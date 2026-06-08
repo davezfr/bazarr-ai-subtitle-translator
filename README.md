@@ -79,7 +79,7 @@ Use any model that can follow JSON/structured-output instructions reliably.
 ## Install
 
 ```bash
-git clone https://github.com/your-name/bazarr-ai-subtitle-translator.git
+git clone https://github.com/davezfr/bazarr-ai-subtitle-translator.git
 cd bazarr-ai-subtitle-translator
 ./scripts/install-upstream.sh
 cp .env.example .env
