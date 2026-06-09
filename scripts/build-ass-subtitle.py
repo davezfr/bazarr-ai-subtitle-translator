@@ -26,11 +26,19 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
-SIZE_TABLE = {
-    360: (19, 14),
-    720: (38, 24),
-    1080: (56, 36),
-    2160: (112, 72),
+SIZE_TABLES = {
+    "cjk": {
+        360: (19, 14),
+        720: (38, 24),
+        1080: (56, 36),
+        2160: (112, 72),
+    },
+    "latin": {
+        360: (16, 11),
+        720: (32, 23),
+        1080: (48, 34),
+        2160: (96, 68),
+    },
 }
 
 SOURCE_MARGIN_TABLE = {
@@ -38,6 +46,16 @@ SOURCE_MARGIN_TABLE = {
     720: 36,
     1080: 55,
     2160: 110,
+}
+
+PRIMARY_FONT_BY_SCRIPT = {
+    "cjk": "PingFang SC",
+    "latin": "Arial",
+}
+
+SECONDARY_FONT_BY_SCRIPT = {
+    "cjk": "PingFang SC",
+    "latin": "Arial",
 }
 
 PLAYRES_TABLE = {
@@ -121,14 +139,20 @@ def needs_flat_separator(previous_text: str, next_text: str) -> bool:
     return True
 
 
-def pick_sizes(height: int | None, target_override: int | None, source_override: int | None) -> tuple[int, int]:
+def pick_sizes(
+    height: int | None,
+    target_override: int | None,
+    source_override: int | None,
+    primary_script: str,
+) -> tuple[int, int]:
     if target_override is not None:
         target_size = target_override
         source_size = source_override if source_override is not None else max(8, round(target_size / 1.7))
         return target_size, source_size
 
-    nearest_height = min(SIZE_TABLE, key=lambda candidate: abs(candidate - (height or 720)))
-    target_size, source_size = SIZE_TABLE[nearest_height]
+    size_table = SIZE_TABLES[primary_script]
+    nearest_height = min(size_table, key=lambda candidate: abs(candidate - (height or 720)))
+    target_size, source_size = size_table[nearest_height]
     if source_override is not None:
         source_size = source_override
     return target_size, source_size
@@ -159,8 +183,8 @@ def build_styles(
         target_marginv = source_marginv + source_size + line_gap
         return "\n".join(
             [
-                f"Style: ZH,{target_font},{target_size},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,3.0,0.6,2,120,120,{target_marginv},1",
-                f"Style: EN,{source_font},{source_size},&H00D6F4FF,&H000000FF,&H00000000,&H90000000,0,0,0,0,100,100,0,0,1,2.4,0.4,2,120,120,{source_marginv},1",
+                f"Style: Primary,{target_font},{target_size},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,3.0,0.6,2,120,120,{target_marginv},1",
+                f"Style: Secondary,{source_font},{source_size},&H00D6F4FF,&H000000FF,&H00000000,&H90000000,0,0,0,0,100,100,0,0,1,2.4,0.4,2,120,120,{source_marginv},1",
             ]
         )
 
@@ -197,10 +221,10 @@ def build_ass(
 
         if mode == "bilingual":
             lines.append(
-                f"Dialogue: 1,{srt_time_to_ass(target_start)},{srt_time_to_ass(target_end)},ZH,,0,0,0,,{join_flat_lines(target_text, clean_terminal=True)}"
+                f"Dialogue: 1,{srt_time_to_ass(target_start)},{srt_time_to_ass(target_end)},Primary,,0,0,0,,{join_flat_lines(target_text, clean_terminal=True)}"
             )
             lines.append(
-                f"Dialogue: 0,{srt_time_to_ass(target_start)},{srt_time_to_ass(target_end)},EN,,0,0,0,,{join_flat_lines(source_text, clean_terminal=True)}"
+                f"Dialogue: 0,{srt_time_to_ass(target_start)},{srt_time_to_ass(target_end)},Secondary,,0,0,0,,{join_flat_lines(source_text, clean_terminal=True)}"
             )
         else:
             lines.append(
@@ -215,12 +239,14 @@ def main() -> int:
     parser.add_argument("--target", required=True, help="Translated target-language SRT path.")
     parser.add_argument("--output", required=True, help="Output ASS path.")
     parser.add_argument("--mode", choices=["target", "bilingual"], default="target")
-    parser.add_argument("--target-size", type=int, default=None)
-    parser.add_argument("--source-size", type=int, default=None)
+    parser.add_argument("--primary-size", "--target-size", dest="target_size", type=int, default=None)
+    parser.add_argument("--secondary-size", "--source-size", dest="source_size", type=int, default=None)
     parser.add_argument("--height", type=int, default=None)
-    parser.add_argument("--font", default="PingFang SC")
-    parser.add_argument("--source-font", default="Arial")
-    parser.add_argument("--marginv", type=int, default=None, help="Bottom margin for target-only subtitles or bilingual source-language line.")
+    parser.add_argument("--primary-font", "--font", dest="font", default=None, help="Primary-language ASS font name.")
+    parser.add_argument("--secondary-font", "--source-font", dest="secondary_font", default=None, help="Secondary-language ASS font name.")
+    parser.add_argument("--primary-script", choices=["cjk", "latin"], default="cjk")
+    parser.add_argument("--secondary-script", choices=["cjk", "latin"], default="latin")
+    parser.add_argument("--marginv", type=int, default=None, help="Bottom margin for target-only subtitles or bilingual secondary-language line.")
     args = parser.parse_args()
 
     source_path = Path(args.source)
@@ -234,16 +260,18 @@ def main() -> int:
         print(f"build-ass-subtitle: no target SRT entries parsed: {target_path}", file=sys.stderr)
         return 1
 
-    target_size, source_size = pick_sizes(args.height, args.target_size, args.source_size)
+    target_size, source_size = pick_sizes(args.height, args.target_size, args.source_size, args.primary_script)
     source_marginv = pick_source_margin(args.height, args.marginv)
     playres_x, playres_y = pick_playres(args.height)
+    primary_font = args.font or PRIMARY_FONT_BY_SCRIPT[args.primary_script]
+    secondary_font = args.secondary_font or SECONDARY_FONT_BY_SCRIPT[args.secondary_script]
     try:
         ass = build_ass(
             source_items,
             target_items,
             args.mode,
-            args.font,
-            args.source_font,
+            primary_font,
+            secondary_font,
             target_size,
             source_size,
             source_marginv,

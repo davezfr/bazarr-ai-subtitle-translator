@@ -387,15 +387,47 @@ test_writes_bilingual_ass_with_target_then_source() {
   fi
 
   grep -q "\\[Script Info\\]" "$output_ass" || fail "expected ASS header"
-  grep -q "Style: ZH" "$output_ass" || fail "expected target-language ASS style"
-  grep -q "Style: EN" "$output_ass" || fail "expected source-language ASS style"
-  grep -q "Dialogue: 1,0:00:01.00,0:00:03.00,ZH" "$output_ass" || fail "expected target text in ZH dialogue"
-  grep -q "Dialogue: 0,0:00:01.00,0:00:03.00,EN" "$output_ass" || fail "expected source text in EN dialogue"
+  grep -q "Style: Primary" "$output_ass" || fail "expected primary-language ASS style"
+  grep -q "Style: Secondary" "$output_ass" || fail "expected secondary-language ASS style"
+  grep -q "Dialogue: 1,0:00:01.00,0:00:03.00,Primary" "$output_ass" || fail "expected target text in Primary dialogue"
+  grep -q "Dialogue: 0,0:00:01.00,0:00:03.00,Secondary" "$output_ass" || fail "expected source text in Secondary dialogue"
   grep -q "大家好" "$output_ass" || fail "expected target text in ASS subtitle"
   if grep -q "大家好。" "$output_ass"; then
     fail "expected bilingual ASS target text to remove terminal Chinese full stop"
   fi
   grep -q "Bonjour à tous" "$output_ass" || fail "expected source text in ASS subtitle"
+
+  rm -rf "$work_dir"
+}
+
+test_bilingual_ass_default_output_uses_target_language_suffix() {
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/subtitle-wrapper-test.XXXXXX")
+  upstream_dir="$work_dir/upstream"
+  input="$work_dir/movie.en.srt"
+
+  make_translating_fake_upstream "$upstream_dir"
+  make_srt "$input"
+
+  run_wrapper_with_settings \
+    "$upstream_dir" \
+    "$input" \
+    SUBTRANS_SOURCE_LANGUAGE="English" \
+    SUBTRANS_SOURCE_SUFFIXES="en,eng,english" \
+    SUBTRANS_TARGET_LANGUAGE="French" \
+    SUBTRANS_TARGET_SUFFIX="fr" \
+    SUBTRANS_OUTPUT_FORMAT="ass" \
+    SUBTRANS_OUTPUT_MODE="bilingual" \
+    SUBTRANS_ASS_PRIMARY_SCRIPT="latin" \
+    SUBTRANS_ASS_SECONDARY_SCRIPT="latin" \
+    >/dev/null
+
+  if [ ! -s "$work_dir/movie.fr.ass" ]; then
+    fail "expected bilingual ASS output to use target/primary language suffix"
+  fi
+
+  if [ -e "$work_dir/movie.en.ass" ] || [ -e "$work_dir/movie.en-fr.ass" ] || [ -e "$work_dir/movie.bilingual.ass" ]; then
+    fail "bilingual ASS output should not use source, pair, or bilingual suffixes"
+  fi
 
   rm -rf "$work_dir"
 }
@@ -417,7 +449,7 @@ test_bilingual_ass_accepts_font_name_with_spaces() {
     SUBTRANS_ASS_FONT="PingFang SC" \
     >/dev/null
 
-  grep -q "Style: ZH,PingFang SC" "$output_ass" || fail "expected target ASS font with spaces to be preserved"
+  grep -q "Style: Primary,PingFang SC" "$output_ass" || fail "expected target ASS font with spaces to be preserved"
 
   rm -rf "$work_dir"
 }
@@ -439,7 +471,58 @@ test_bilingual_ass_accepts_source_font_name_with_spaces() {
     SUBTRANS_ASS_SOURCE_FONT="Noto Sans" \
     >/dev/null
 
-  grep -q "Style: EN,Noto Sans" "$output_ass" || fail "expected source ASS font with spaces to be preserved"
+  grep -q "Style: Secondary,Noto Sans" "$output_ass" || fail "expected source ASS font with spaces to be preserved"
+
+  rm -rf "$work_dir"
+}
+
+test_bilingual_ass_accepts_latin_primary_script_profile() {
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/subtitle-wrapper-test.XXXXXX")
+  upstream_dir="$work_dir/upstream"
+  input="$work_dir/movie.en.srt"
+  output_ass="$work_dir/movie.zh.ass"
+
+  make_translating_fake_upstream "$upstream_dir"
+  make_srt "$input"
+
+  run_wrapper_with_settings \
+    "$upstream_dir" \
+    "$input" \
+    SUBTRANS_OUTPUT_FORMAT="ass" \
+    SUBTRANS_OUTPUT_MODE="bilingual" \
+    SUBTRANS_ASS_HEIGHT="1080" \
+    SUBTRANS_ASS_PRIMARY_SCRIPT="latin" \
+    SUBTRANS_ASS_SECONDARY_SCRIPT="latin" \
+    >/dev/null
+
+  grep -q "Style: Primary,Arial,48" "$output_ass" || fail "expected latin primary script profile to use latin primary style"
+  grep -q "Style: Secondary,Arial,34" "$output_ass" || fail "expected latin primary script profile to use latin secondary style"
+
+  rm -rf "$work_dir"
+}
+
+test_bilingual_ass_accepts_primary_secondary_style_overrides() {
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/subtitle-wrapper-test.XXXXXX")
+  upstream_dir="$work_dir/upstream"
+  input="$work_dir/movie.en.srt"
+  output_ass="$work_dir/movie.zh.ass"
+
+  make_translating_fake_upstream "$upstream_dir"
+  make_srt "$input"
+
+  run_wrapper_with_settings \
+    "$upstream_dir" \
+    "$input" \
+    SUBTRANS_OUTPUT_FORMAT="ass" \
+    SUBTRANS_OUTPUT_MODE="bilingual" \
+    SUBTRANS_ASS_PRIMARY_FONT="Noto Sans" \
+    SUBTRANS_ASS_SECONDARY_FONT="Helvetica Neue" \
+    SUBTRANS_ASS_PRIMARY_SIZE="50" \
+    SUBTRANS_ASS_SECONDARY_SIZE="33" \
+    >/dev/null
+
+  grep -q "Style: Primary,Noto Sans,50" "$output_ass" || fail "expected primary ASS style overrides to be preserved"
+  grep -q "Style: Secondary,Helvetica Neue,33" "$output_ass" || fail "expected secondary ASS style overrides to be preserved"
 
   rm -rf "$work_dir"
 }
@@ -475,8 +558,11 @@ test_allows_configured_french_source_suffix
 test_allows_underscore_source_suffix_and_preserves_separator
 test_rejects_srt_bilingual_mode
 test_writes_bilingual_ass_with_target_then_source
+test_bilingual_ass_default_output_uses_target_language_suffix
 test_bilingual_ass_accepts_font_name_with_spaces
 test_bilingual_ass_accepts_source_font_name_with_spaces
+test_bilingual_ass_accepts_latin_primary_script_profile
+test_bilingual_ass_accepts_primary_secondary_style_overrides
 test_srt_output_cleans_terminal_statement_punctuation
 
 echo "wrapper-behavior: ok"

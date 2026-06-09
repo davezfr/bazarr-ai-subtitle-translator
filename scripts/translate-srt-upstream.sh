@@ -216,11 +216,13 @@ if [ "$OUTPUT_FORMAT" = "ass" ]; then
     --target "$TMP_OUTPUT" \
     --output "$OUTPUT_PATH" \
     --mode "$OUTPUT_MODE"
-  if [ -n "${SUBTRANS_ASS_TARGET_SIZE:-}" ]; then
-    set -- "$@" --target-size "$SUBTRANS_ASS_TARGET_SIZE"
+  if [ -n "${SUBTRANS_ASS_PRIMARY_SIZE:-${SUBTRANS_ASS_TARGET_SIZE:-}}" ]; then
+    primary_size="${SUBTRANS_ASS_PRIMARY_SIZE:-$SUBTRANS_ASS_TARGET_SIZE}"
+    set -- "$@" --primary-size "$primary_size"
   fi
-  if [ -n "${SUBTRANS_ASS_SOURCE_SIZE:-}" ]; then
-    set -- "$@" --source-size "$SUBTRANS_ASS_SOURCE_SIZE"
+  if [ -n "${SUBTRANS_ASS_SECONDARY_SIZE:-${SUBTRANS_ASS_SOURCE_SIZE:-}}" ]; then
+    secondary_size="${SUBTRANS_ASS_SECONDARY_SIZE:-$SUBTRANS_ASS_SOURCE_SIZE}"
+    set -- "$@" --secondary-size "$secondary_size"
   fi
   if [ -n "${SUBTRANS_ASS_HEIGHT:-}" ]; then
     set -- "$@" --height "$SUBTRANS_ASS_HEIGHT"
@@ -228,11 +230,19 @@ if [ "$OUTPUT_FORMAT" = "ass" ]; then
   if [ -n "${SUBTRANS_ASS_MARGINV:-}" ]; then
     set -- "$@" --marginv "$SUBTRANS_ASS_MARGINV"
   fi
-  if [ -n "${SUBTRANS_ASS_FONT:-}" ]; then
-    set -- "$@" --font "$SUBTRANS_ASS_FONT"
+  if [ -n "${SUBTRANS_ASS_PRIMARY_FONT:-${SUBTRANS_ASS_FONT:-}}" ]; then
+    primary_font="${SUBTRANS_ASS_PRIMARY_FONT:-$SUBTRANS_ASS_FONT}"
+    set -- "$@" --primary-font "$primary_font"
   fi
-  if [ -n "${SUBTRANS_ASS_SOURCE_FONT:-}" ]; then
-    set -- "$@" --source-font "$SUBTRANS_ASS_SOURCE_FONT"
+  if [ -n "${SUBTRANS_ASS_SECONDARY_FONT:-${SUBTRANS_ASS_SOURCE_FONT:-}}" ]; then
+    secondary_font="${SUBTRANS_ASS_SECONDARY_FONT:-$SUBTRANS_ASS_SOURCE_FONT}"
+    set -- "$@" --secondary-font "$secondary_font"
+  fi
+  if [ -n "${SUBTRANS_ASS_PRIMARY_SCRIPT:-}" ]; then
+    set -- "$@" --primary-script "$SUBTRANS_ASS_PRIMARY_SCRIPT"
+  fi
+  if [ -n "${SUBTRANS_ASS_SECONDARY_SCRIPT:-}" ]; then
+    set -- "$@" --secondary-script "$SUBTRANS_ASS_SECONDARY_SCRIPT"
   fi
 
   python3 "$PROJECT_DIR/scripts/build-ass-subtitle.py" "$@"

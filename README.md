@@ -1,20 +1,24 @@
-# Bazarr AI Subtitle Translator
+# AI Subtitle Translation Workflow
 
-Translate Bazarr-downloaded SRT subtitles into target-language SRT or ASS
-sidecar subtitles with an OpenAI-compatible LLM endpoint.
+Translate existing SRT subtitles into target-language SRT or optional ASS
+sidecar subtitles with a deterministic, model-assisted workflow.
 
 This project is intentionally small. It does not manage media libraries, search
-subtitle providers, or talk to Plex directly. Bazarr downloads subtitles; this
-tool translates the subtitle file Bazarr just downloaded.
+subtitle providers, or talk to Plex directly. The core workflow starts from an
+existing timed SRT file, translates cue text, preserves subtitle structure, and
+writes the requested output files. Bazarr can call it later as an adapter, but
+the workflow itself is not Bazarr-specific.
 
 ## What It Does
 
 ```text
-Bazarr downloads movie.en.srt or movie.fr.srt
-  -> Bazarr custom post-processing calls this project
-  -> OpenAI-compatible model translates the SRT text
-  -> movie.zh.srt or movie.zh.ass is written next to the media file
-  -> Plex sees the target-language sidecar subtitle
+movie.en.srt
+  -> workflow parses cue ids and timestamps
+  -> model translates cue text only
+  -> workflow validates one translation per cue
+  -> optional model alignment check catches shifted cue meanings
+  -> movie.fr.srt is written as the primary artifact
+  -> optional movie.fr.ass is composed for styled or bilingual display
 ```
 
 ## Current Status
@@ -27,17 +31,22 @@ MVP:
 - SRT target-language output
 - ASS target-language output
 - ASS bilingual output: target language on top, original/source language below
-- Experimental V2 deterministic chunked translator
-- OpenAI-compatible API support
+- V2 deterministic chunked translator
+- Generic workflow CLI for existing SRT files
+- Codex CLI stable local runner
+- OpenAI-compatible API support as the long-term endpoint target
 - Local Ollama support through `OPENAI_BASE_URL`
 - Custom prompt file
 - Existing output safety: skips when the configured output file already exists unless forced
 - Output validation: timestamp count must match and translated subtitle entries
   must contain non-empty text
+- Optional semantic alignment gate: after structure validation, a model can
+  compare source cues with candidate translations and reject chunks whose
+  meanings shifted to neighboring cue numbers
 - Display-layer punctuation cleanup: ordinary terminal statement punctuation is
   removed from subtitle display text, while questions, exclamations, ellipses,
   and protected abbreviations are preserved
-- Bazarr custom post-processing wrapper
+- Bazarr custom post-processing wrapper adapter
 
 Not yet included:
 
@@ -122,6 +131,66 @@ export OPENAI_BASE_URL="http://model-server.local:11434/v1"
 
 ## Translate Manually
 
+Recommended generic workflow CLI:
+
+```bash
+python3 scripts/subtitle-workflow.py \
+  --input /path/to/movie.en.srt \
+  --source-language English \
+  --target-language French \
+  --target-suffix fr \
+  --backend codex-cli \
+  --model gpt-5.4-mini
+```
+
+This writes the canonical primary-language SRT:
+
+```text
+/path/to/movie.fr.srt
+```
+
+For bilingual ASS, keep the same translated SRT artifact and add a styled ASS
+sidecar:
+
+```bash
+python3 scripts/subtitle-workflow.py \
+  --input /path/to/movie.en.srt \
+  --source-language English \
+  --target-language French \
+  --target-suffix fr \
+  --backend codex-cli \
+  --output-mode bilingual \
+  --primary-script latin \
+  --secondary-script latin
+```
+
+This writes:
+
+```text
+/path/to/movie.fr.srt
+/path/to/movie.fr.ass
+```
+
+The core output matrix is:
+
+```text
+Primary-only translation      -> SRT by default
+Primary-only styled subtitle  -> optional ASS
+Primary + secondary bilingual -> ASS only
+Primary + secondary SRT       -> rejected
+```
+
+Translation execution is split into two practical layers:
+
+- OpenAI-compatible endpoints remain the long-term public API target.
+- For this version, the most stable local runner is the lower-level Codex CLI
+  backend.
+
+This project does not guarantee Claude Code, Gemini CLI, OpenCode, or other AI
+CLI wrappers. See `docs/translation-backends.md`.
+
+Legacy upstream-wrapper path:
+
 ```bash
 ./scripts/translate-srt-upstream.sh /path/to/movie.en.srt
 ```
@@ -170,8 +239,8 @@ For bilingual ASS, each subtitle cue is rendered as two same-time ASS dialogue
 events with separate styles:
 
 ```text
-ZH style: target-language line, larger, white, higher bottom margin
-EN style: source-language line, smaller, near-white pale yellow, lower bottom margin
+Primary style: main comprehension line, larger, white, higher bottom margin
+Secondary style: source/original-language line, smaller, near-white pale yellow, lower bottom margin
 ```
 
 The bilingual builder flattens existing SRT line breaks into one line per
@@ -185,14 +254,25 @@ exclamation marks, ellipses, and protected English abbreviations such as
 `Mr.` or `U.S.`. This is a post-processing display rule, not part of the
 translation prompt.
 
+The V3 output template uses role names instead of language-specific style names:
+`Primary` for the main comprehension language and `Secondary` for the reference
+or learning language. See `docs/subtitle-output-template.md` for the standard
+presets, including Chinese-English and French-English bilingual layouts.
+
+Plex-facing bilingual ASS files are named by the primary language. For example,
+Chinese-English output uses `.zh.ass`, while French-English output uses
+`.fr.ass`. Avoid pair suffixes such as `.zh-en.ass`; Plex expects a single
+language code in the sidecar filename.
+
 SRT bilingual output is intentionally rejected because SRT cannot express
 different font sizes or visual hierarchy inside a single subtitle cue. Use ASS
 for bilingual subtitles.
 
 ## Translate With V2
 
-The experimental V2 path keeps SRT structure in local code and asks the model to
-return target-language text only:
+The V2 path is the core translation engine used by the generic workflow CLI. It
+keeps SRT structure in local code and asks the model to return target-language
+text only:
 
 ```bash
 python3 scripts/translate-srt-v2.py \
@@ -200,16 +280,28 @@ python3 scripts/translate-srt-v2.py \
   --output /path/to/movie.zh.srt \
   --summary /path/to/movie.zh.summary.json \
   --backend codex-cli \
-  --model gpt-5.4-mini \
-  --chunk-size 100 \
-  --concurrency 3
+  --model gpt-5.4-mini
 ```
 
 The output SRT is rebuilt from the source cue numbers and timestamps. The model
 does not write final SRT, cannot change timestamps, and failed chunks are
 retried independently.
 
+Chunk sizing and endpoint concurrency are internal workflow policy, not normal
+user settings. The current policy uses 100 cues per translation chunk and
+selects concurrency automatically from subtitle length:
+
+```text
+<= 250 cues   -> 2 workers
+251-500 cues  -> 3 workers
+501-800 cues  -> 4 workers
+> 800 cues    -> 6 workers
+```
+
 ## Bazarr Integration
+
+Bazarr integration is an adapter around the subtitle workflow, not the core
+product boundary.
 
 In Bazarr:
 
@@ -238,29 +330,37 @@ SUBTRANS_SOURCE_LANGUAGE    Source language label passed to the model. Default: 
 SUBTRANS_SOURCE_SUFFIXES    Comma-separated filename suffixes accepted as source subtitles.
                             Supports dot or underscore separators, such as .en.srt or _English.srt.
 SUBTRANS_TARGET_LANGUAGE    Target language label passed to the model. Default: Simplified Chinese.
-SUBTRANS_TARGET_SUFFIX      Output filename language suffix. Default: zh.
+SUBTRANS_TARGET_SUFFIX      Output filename language suffix and Plex primary-language code. Default: zh.
 SUBTRANS_OUTPUT_FORMAT      Output format: srt or ass. Default: srt.
 SUBTRANS_OUTPUT_MODE        Output mode: target or bilingual. Bilingual requires ass.
-SUBTRANS_BACKEND            V2 backend: codex-cli, fake, or fake-extra.
-SUBTRANS_CHUNK_SIZE         V2 cues per translation chunk. Default: 100.
-SUBTRANS_CONCURRENCY        V2 parallel translation workers. Default: 3.
+SUBTRANS_BACKEND            Translation backend. Current stable local value: codex-cli.
+                            Long-term public endpoint target: openai-compatible.
+SUBTRANS_OPENAI_RESPONSE_FORMAT OpenAI-compatible response_format: none, json_object, or json_schema.
+SUBTRANS_OPENAI_TIMEOUT     OpenAI-compatible request timeout in seconds. Default: 300.
 SUBTRANS_MAX_RETRIES        V2 retries per failed chunk. Default: 3.
 SUBTRANS_CONTEXT_TOKENS     Translation history context budget. Default: 2000.
 SUBTRANS_TEMPERATURE        Translation temperature. Default: 0.
 SUBTRANS_FORCE              Set to 1 to overwrite existing output.
+SUBTRANS_ENDPOINT_PROMPT_FILE Endpoint-only system prompt for OpenAI-compatible calls.
 SUBTRANS_FORMAT_PROMPT_FILE Format contract prompt path.
 SUBTRANS_PROMPT_FILE        Style/custom prompt file path appended after the format contract.
-SUBTRANS_ASS_TARGET_SIZE    Optional ASS target-language font size.
-SUBTRANS_ASS_SOURCE_SIZE    Optional ASS source-language font size.
+SUBTRANS_ASS_PRIMARY_SCRIPT Optional ASS primary script profile: cjk or latin. Default: cjk.
+SUBTRANS_ASS_SECONDARY_SCRIPT Optional ASS secondary script profile: cjk or latin. Default: latin.
+SUBTRANS_ASS_PRIMARY_SIZE   Optional ASS primary-language font size.
+SUBTRANS_ASS_SECONDARY_SIZE Optional ASS secondary-language font size.
 SUBTRANS_ASS_HEIGHT         Optional video height used to pick ASS default sizes.
-SUBTRANS_ASS_MARGINV        Optional ASS bottom margin. In bilingual ASS this controls the source line.
-SUBTRANS_ASS_FONT           Optional ASS target-language font name.
-SUBTRANS_ASS_SOURCE_FONT    Optional ASS source-language font name.
+SUBTRANS_ASS_MARGINV        Optional ASS bottom margin. In bilingual ASS this controls the secondary line.
+SUBTRANS_ASS_PRIMARY_FONT   Optional ASS primary-language font name.
+SUBTRANS_ASS_SECONDARY_FONT Optional ASS secondary-language font name.
 SUBTRANS_RUNTIME_DIR        Runtime dependency directory. Default: .runtime.
 SUBTRANS_UPSTREAM_DIR       Installed upstream directory.
 SUBTRANS_UPSTREAM_REF       Upstream commit/ref to install.
 SUBTRANS_LOG_LEVEL          Upstream log level. Default: warn.
 ```
+
+Legacy V2 ASS variable names are still accepted: `SUBTRANS_ASS_TARGET_SIZE`,
+`SUBTRANS_ASS_SOURCE_SIZE`, `SUBTRANS_ASS_FONT`, and
+`SUBTRANS_ASS_SOURCE_FONT`.
 
 ## Prompt
 
@@ -286,10 +386,13 @@ Use `SUBTRANS_PROMPT_FILE` for your translation style guide. Use
 When overriding either value from Bazarr or Docker, use paths that are absolute
 inside that container.
 
-The default style prompt keeps foreign personal names in Latin spelling, such
-as Foggy, Karen, Matt, Nelson, and Murdock. Generic speaker labels may be
-translated for readability, such as Reporter -> 记者, Officer -> 警官, Man 1 ->
-男1, and Woman 2 -> 女2.
+The default style prompt is written in English but is language-neutral. Source
+and target languages are supplied by workflow arguments or environment
+variables. It keeps personal names in the form used by the source subtitles
+and treats names, organizations, brands, products, acronyms, and code
+identifiers as protected source terms unless an explicit glossary or
+project-specific instruction says otherwise. Generic speaker labels may be
+translated naturally into the target language.
 
 ## Development
 
@@ -332,11 +435,11 @@ consume the sidecar.
 For bilingual output, this project follows the same practical lesson as Xiaohu:
 SRT is a poor bilingual presentation format, so bilingual output is ASS only.
 
-## V2 Translation Direction
+## Workflow Direction
 
-The experimental V2 translator is designed for already-timed sidecar subtitles. Unlike
-Whisper output, these subtitles usually do not need ASR cleanup, aggressive
-de-redundancy, punctuation stripping, retiming, or re-segmentation.
+The workflow is designed for already-timed sidecar subtitles. Unlike Whisper
+output, these subtitles usually do not need ASR cleanup, aggressive
+de-redundancy, retiming, or re-segmentation.
 
 The V2 boundary is:
 
@@ -355,7 +458,7 @@ source SRT
   -> validate structured worker output with code
   -> retry failed chunks only
   -> rebuild target-language SRT from original cue ids and timestamps
-  -> optionally compose target/source bilingual ASS
+  -> optionally compose target-only or bilingual ASS
 ```
 
 Translation workers may be parallel sub-agents or CLI worker processes. They
@@ -373,11 +476,12 @@ test plan.
 ## Roadmap
 
 - Add VTT input support.
-- Integrate the V2 deterministic chunked translator into the Bazarr wrapper.
+- Package the generic workflow as a first-class CLI/Skill.
+- Integrate the generic workflow CLI into the Bazarr adapter.
 - Add optional Plex library refresh hook.
 - Add stronger validation for malformed SRT blocks and suspicious untranslated
   output.
-- Package as a Docker image for easier Bazarr deployment.
+- Package as a Docker image for easier deployment.
 - Add a small HTTP service mode for model servers running on a different host.
 
 ## License
