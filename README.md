@@ -1,7 +1,7 @@
 # Bazarr AI Subtitle Translator
 
-Translate Bazarr-downloaded English SRT subtitles into Chinese sidecar subtitles
-with an OpenAI-compatible LLM endpoint.
+Translate Bazarr-downloaded SRT subtitles into target-language SRT or ASS
+sidecar subtitles with an OpenAI-compatible LLM endpoint.
 
 This project is intentionally small. It does not manage media libraries, search
 subtitle providers, or talk to Plex directly. Bazarr downloads subtitles; this
@@ -10,29 +10,36 @@ tool translates the subtitle file Bazarr just downloaded.
 ## What It Does
 
 ```text
-Bazarr downloads movie.en.srt
+Bazarr downloads movie.en.srt or movie.fr.srt
   -> Bazarr custom post-processing calls this project
   -> OpenAI-compatible model translates the SRT text
-  -> movie.zh.srt is written next to the media file
-  -> Plex sees the Chinese sidecar subtitle
+  -> movie.zh.srt or movie.zh.ass is written next to the media file
+  -> Plex sees the target-language sidecar subtitle
 ```
 
 ## Current Status
 
 MVP:
 
-- SRT input and output
-- English filename guard: only translates files such as `.en.srt` or `.eng.srt`
-- Chinese output naming: `.zh.srt`
+- SRT input
+- Configurable source language and source filename suffixes
+- Configurable target language and target filename suffix
+- SRT target-language output
+- ASS target-language output
+- ASS bilingual output: target language on top, original/source language below
+- Experimental V2 deterministic chunked translator
 - OpenAI-compatible API support
 - Local Ollama support through `OPENAI_BASE_URL`
 - Custom prompt file
-- Existing output safety: skips when `.zh.srt` already exists unless forced
+- Existing output safety: skips when the configured output file already exists unless forced
+- Output validation: timestamp count must match and translated subtitle entries
+  must contain non-empty text
 - Bazarr custom post-processing wrapper
 
 Not yet included:
 
-- ASS/VTT support
+- VTT input support
+- Bazarr wrapper integration for the V2 translator
 - Built-in web UI
 - Translation queue
 - Plex refresh API call
@@ -89,12 +96,18 @@ Edit `.env` or export the same variables in your shell.
 
 ## Configure
 
-Example for local Ollama:
+Example for local Ollama and English-to-Chinese target-language SRT:
 
 ```bash
 export OPENAI_BASE_URL="http://127.0.0.1:11434/v1"
 export OPENAI_API_KEY="ollama"
 export SUBTRANS_MODEL="gemma4:latest"
+export SUBTRANS_SOURCE_LANGUAGE="English"
+export SUBTRANS_SOURCE_SUFFIXES="en,eng,english"
+export SUBTRANS_TARGET_LANGUAGE="Simplified Chinese"
+export SUBTRANS_TARGET_SUFFIX="zh"
+export SUBTRANS_OUTPUT_FORMAT="srt"
+export SUBTRANS_OUTPUT_MODE="target"
 ```
 
 When Bazarr runs inside Docker on another machine, do not use `127.0.0.1` for a
@@ -122,6 +135,53 @@ You can also pass the output path explicitly:
 ./scripts/translate-srt-upstream.sh /path/to/movie.en.srt /path/to/movie.zh.srt
 ```
 
+For French-to-Chinese:
+
+```bash
+SUBTRANS_SOURCE_LANGUAGE="French" \
+SUBTRANS_SOURCE_SUFFIXES="fr,fra,french" \
+SUBTRANS_TARGET_LANGUAGE="Simplified Chinese" \
+SUBTRANS_TARGET_SUFFIX="zh" \
+./scripts/translate-srt-upstream.sh /path/to/movie.fr.srt
+```
+
+For bilingual ASS output:
+
+```bash
+SUBTRANS_OUTPUT_FORMAT=ass \
+SUBTRANS_OUTPUT_MODE=bilingual \
+./scripts/translate-srt-upstream.sh /path/to/movie.en.srt
+```
+
+This writes `movie.zh.ass`. In bilingual ASS mode, the model still produces only
+the target-language translation. The wrapper then combines translated text with
+the original source text so the target language appears on top and the original
+line appears below at a smaller size.
+
+SRT bilingual output is intentionally rejected because SRT cannot express
+different font sizes or visual hierarchy inside a single subtitle cue. Use ASS
+for bilingual subtitles.
+
+## Translate With V2
+
+The experimental V2 path keeps SRT structure in local code and asks the model to
+return target-language text only:
+
+```bash
+python3 scripts/translate-srt-v2.py \
+  --input /path/to/movie.en.srt \
+  --output /path/to/movie.zh.srt \
+  --summary /path/to/movie.zh.summary.json \
+  --backend codex-cli \
+  --model gpt-5.4-mini \
+  --chunk-size 100 \
+  --concurrency 3
+```
+
+The output SRT is rebuilt from the source cue numbers and timestamps. The model
+does not write final SRT, cannot change timestamps, and failed chunks are
+retried independently.
+
 ## Bazarr Integration
 
 In Bazarr:
@@ -147,10 +207,27 @@ and `.runtime/` directory into Bazarr's `/config/scripts` area.
 OPENAI_BASE_URL             OpenAI-compatible base URL.
 OPENAI_API_KEY              API key. Use any non-empty value for local Ollama.
 SUBTRANS_MODEL              Model name. Default: gemma4:latest.
+SUBTRANS_SOURCE_LANGUAGE    Source language label passed to the model. Default: English.
+SUBTRANS_SOURCE_SUFFIXES    Comma-separated filename suffixes accepted as source subtitles.
+                            Supports dot or underscore separators, such as .en.srt or _English.srt.
+SUBTRANS_TARGET_LANGUAGE    Target language label passed to the model. Default: Simplified Chinese.
+SUBTRANS_TARGET_SUFFIX      Output filename language suffix. Default: zh.
+SUBTRANS_OUTPUT_FORMAT      Output format: srt or ass. Default: srt.
+SUBTRANS_OUTPUT_MODE        Output mode: target or bilingual. Bilingual requires ass.
+SUBTRANS_BACKEND            V2 backend: codex-cli, fake, or fake-extra.
+SUBTRANS_CHUNK_SIZE         V2 cues per translation chunk. Default: 100.
+SUBTRANS_CONCURRENCY        V2 parallel translation workers. Default: 3.
+SUBTRANS_MAX_RETRIES        V2 retries per failed chunk. Default: 3.
 SUBTRANS_CONTEXT_TOKENS     Translation history context budget. Default: 2000.
 SUBTRANS_TEMPERATURE        Translation temperature. Default: 0.
 SUBTRANS_FORCE              Set to 1 to overwrite existing output.
-SUBTRANS_PROMPT_FILE        Custom prompt file path.
+SUBTRANS_FORMAT_PROMPT_FILE Format contract prompt path.
+SUBTRANS_PROMPT_FILE        Style/custom prompt file path appended after the format contract.
+SUBTRANS_ASS_TARGET_SIZE    Optional ASS target-language font size.
+SUBTRANS_ASS_SOURCE_SIZE    Optional ASS source-language font size.
+SUBTRANS_ASS_HEIGHT         Optional video height used to pick ASS default sizes.
+SUBTRANS_ASS_MARGINV        Optional ASS bottom margin.
+SUBTRANS_ASS_FONT           Optional ASS font name.
 SUBTRANS_RUNTIME_DIR        Runtime dependency directory. Default: .runtime.
 SUBTRANS_UPSTREAM_DIR       Installed upstream directory.
 SUBTRANS_UPSTREAM_REF       Upstream commit/ref to install.
@@ -159,17 +236,41 @@ SUBTRANS_LOG_LEVEL          Upstream log level. Default: warn.
 
 ## Prompt
 
-Default prompt:
+Default format contract:
+
+```text
+prompts/format-contract-system.md
+```
+
+Default style prompt:
 
 ```text
 prompts/xiaohu-style-system.md
 ```
 
-It asks the model to keep one-to-one subtitle entry correspondence, preserve
-formatting tags, avoid obeying instructions inside subtitle text, and produce
-concise Simplified Chinese.
+The wrapper prepends the format contract before the style prompt. This keeps
+format rules such as one-to-one subtitle correspondence, target-language-only
+model output, no extra comments, and tag preservation stable even when the
+translation style prompt changes.
+
+Use `SUBTRANS_PROMPT_FILE` for your translation style guide. Use
+`SUBTRANS_FORMAT_PROMPT_FILE` only when changing the pipeline contract itself.
+When overriding either value from Bazarr or Docker, use paths that are absolute
+inside that container.
+
+The default style prompt keeps foreign personal names in Latin spelling, such
+as Foggy, Karen, Matt, Nelson, and Murdock. Generic speaker labels may be
+translated for readability, such as Reporter -> 记者, Officer -> 警官, Man 1 ->
+男1, and Woman 2 -> 女2.
 
 ## Development
+
+Run fast wrapper behavior checks without calling a model:
+
+```bash
+sh tests/wrapper-behavior.sh
+sh tests/prompt-contract.sh
+```
 
 Run a smoke test with local Ollama:
 
@@ -177,15 +278,77 @@ Run a smoke test with local Ollama:
 ./scripts/smoke-test.sh
 ```
 
-The smoke test creates a temporary English SRT, runs the wrapper, and checks that
-the output SRT exists.
+The wrapper behavior test uses a fake upstream translator to check local shell
+logic such as filename guards, output naming, and ASS composition. The smoke
+test creates a temporary English SRT, runs the real upstream wrapper with the
+default English-to-Chinese SRT configuration, and checks that the output SRT
+exists.
+
+## Xiaohu-Inspired Workflow Boundary
+
+This project borrows the proven shape of
+[xiaohu-video-translate](https://github.com/xiaohuailabs/xiaohu-video-translate)
+from the point where a timed subtitle already exists:
+
+```text
+existing SRT
+  -> translate target-language SRT
+  -> polish through the style prompt
+  -> optionally compose ASS sidecar
+```
+
+It does not download videos, extract audio, run Whisper, or burn subtitles into
+video files. Bazarr already supplies the timed subtitle file, and Plex/Bazarr
+consume the sidecar.
+
+For bilingual output, this project follows the same practical lesson as Xiaohu:
+SRT is a poor bilingual presentation format, so bilingual output is ASS only.
+
+## V2 Translation Direction
+
+The experimental V2 translator is designed for already-timed sidecar subtitles. Unlike
+Whisper output, these subtitles usually do not need ASR cleanup, aggressive
+de-redundancy, punctuation stripping, retiming, or re-segmentation.
+
+The V2 boundary is:
+
+```text
+model owns language
+program owns subtitle structure
+```
+
+Current flow:
+
+```text
+source SRT
+  -> parse cue list
+  -> split into chunks of roughly 80-120 cues
+  -> translate chunks in parallel workers
+  -> validate structured worker output with code
+  -> retry failed chunks only
+  -> rebuild target-language SRT from original cue ids and timestamps
+  -> optionally compose target/source bilingual ASS
+```
+
+Translation workers may be parallel sub-agents or CLI worker processes. They
+should return structured target-language text only, not full SRT. Cue counts,
+cue ids, timestamps, empty translations, and accidental extra output are checked
+by deterministic code rather than by another model.
+
+An optional QA agent can sample translations for naturalness, tone, terminology
+consistency, and obvious mistranslations. It is a quality layer, not the format
+validator.
+
+See `IMPLEMENTATION_PLAN.md` for the V2 module breakdown and first full-episode
+test plan.
 
 ## Roadmap
 
-- Add ASS/VTT support.
-- Add bilingual output mode.
+- Add VTT input support.
+- Integrate the V2 deterministic chunked translator into the Bazarr wrapper.
 - Add optional Plex library refresh hook.
-- Add stronger validation for subtitle entry count and empty translations.
+- Add stronger validation for malformed SRT blocks and suspicious untranslated
+  output.
 - Package as a Docker image for easier Bazarr deployment.
 - Add a small HTTP service mode for model servers running on a different host.
 
