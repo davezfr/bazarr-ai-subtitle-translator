@@ -130,7 +130,7 @@ if (!output) {
 
 fs.writeFileSync(output, `1
 00:00:01,000 --> 00:00:03,000
-大家好
+大家好。
 
 `)
 EOF
@@ -387,7 +387,14 @@ test_writes_bilingual_ass_with_target_then_source() {
   fi
 
   grep -q "\\[Script Info\\]" "$output_ass" || fail "expected ASS header"
-  grep -q "大家好\\\\N" "$output_ass" || fail "expected target text on first ASS line"
+  grep -q "Style: ZH" "$output_ass" || fail "expected target-language ASS style"
+  grep -q "Style: EN" "$output_ass" || fail "expected source-language ASS style"
+  grep -q "Dialogue: 1,0:00:01.00,0:00:03.00,ZH" "$output_ass" || fail "expected target text in ZH dialogue"
+  grep -q "Dialogue: 0,0:00:01.00,0:00:03.00,EN" "$output_ass" || fail "expected source text in EN dialogue"
+  grep -q "大家好" "$output_ass" || fail "expected target text in ASS subtitle"
+  if grep -q "大家好。" "$output_ass"; then
+    fail "expected bilingual ASS target text to remove terminal Chinese full stop"
+  fi
   grep -q "Bonjour à tous" "$output_ass" || fail "expected source text in ASS subtitle"
 
   rm -rf "$work_dir"
@@ -410,7 +417,51 @@ test_bilingual_ass_accepts_font_name_with_spaces() {
     SUBTRANS_ASS_FONT="PingFang SC" \
     >/dev/null
 
-  grep -q "Style: Default,PingFang SC" "$output_ass" || fail "expected ASS font with spaces to be preserved"
+  grep -q "Style: ZH,PingFang SC" "$output_ass" || fail "expected target ASS font with spaces to be preserved"
+
+  rm -rf "$work_dir"
+}
+
+test_bilingual_ass_accepts_source_font_name_with_spaces() {
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/subtitle-wrapper-test.XXXXXX")
+  upstream_dir="$work_dir/upstream"
+  input="$work_dir/movie.en.srt"
+  output_ass="$work_dir/movie.zh.ass"
+
+  make_translating_fake_upstream "$upstream_dir"
+  make_srt "$input"
+
+  run_wrapper_with_settings \
+    "$upstream_dir" \
+    "$input" \
+    SUBTRANS_OUTPUT_FORMAT="ass" \
+    SUBTRANS_OUTPUT_MODE="bilingual" \
+    SUBTRANS_ASS_SOURCE_FONT="Noto Sans" \
+    >/dev/null
+
+  grep -q "Style: EN,Noto Sans" "$output_ass" || fail "expected source ASS font with spaces to be preserved"
+
+  rm -rf "$work_dir"
+}
+
+test_srt_output_cleans_terminal_statement_punctuation() {
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/subtitle-wrapper-test.XXXXXX")
+  upstream_dir="$work_dir/upstream"
+  input="$work_dir/movie.en.srt"
+  output_srt="$work_dir/movie.zh.srt"
+
+  make_translating_fake_upstream "$upstream_dir"
+  make_srt "$input"
+
+  run_wrapper_with_settings \
+    "$upstream_dir" \
+    "$input" \
+    >/dev/null
+
+  grep -q "大家好" "$output_srt" || fail "expected translated text in SRT output"
+  if grep -q "大家好。" "$output_srt"; then
+    fail "expected SRT target text to remove terminal Chinese full stop"
+  fi
 
   rm -rf "$work_dir"
 }
@@ -425,5 +476,7 @@ test_allows_underscore_source_suffix_and_preserves_separator
 test_rejects_srt_bilingual_mode
 test_writes_bilingual_ass_with_target_then_source
 test_bilingual_ass_accepts_font_name_with_spaces
+test_bilingual_ass_accepts_source_font_name_with_spaces
+test_srt_output_cleans_terminal_statement_punctuation
 
 echo "wrapper-behavior: ok"

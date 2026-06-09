@@ -34,6 +34,9 @@ MVP:
 - Existing output safety: skips when the configured output file already exists unless forced
 - Output validation: timestamp count must match and translated subtitle entries
   must contain non-empty text
+- Display-layer punctuation cleanup: ordinary terminal statement punctuation is
+  removed from subtitle display text, while questions, exclamations, ellipses,
+  and protected abbreviations are preserved
 - Bazarr custom post-processing wrapper
 
 Not yet included:
@@ -160,7 +163,27 @@ line appears below at a smaller size.
 
 ASS output includes `PlayResX` and `PlayResY` based on
 `SUBTRANS_ASS_HEIGHT` or the `--height` argument so libass has an explicit
-scaling baseline.
+scaling baseline. With that baseline, the default ASS sizes are real
+resolution-relative values, such as Chinese 56 / source 36 for 1080p.
+
+For bilingual ASS, each subtitle cue is rendered as two same-time ASS dialogue
+events with separate styles:
+
+```text
+ZH style: target-language line, larger, white, higher bottom margin
+EN style: source-language line, smaller, near-white pale yellow, lower bottom margin
+```
+
+The bilingual builder flattens existing SRT line breaks into one line per
+language. This avoids four-line bilingual blocks when an original single-
+language SRT cue was wrapped across two lines. Future cue-splitting can improve
+very long dialogue, but this builder does not change timing.
+
+Display output removes ordinary statement punctuation at subtitle line endings:
+Chinese `。` / `，` and English `.` / `,`. It preserves question marks,
+exclamation marks, ellipses, and protected English abbreviations such as
+`Mr.` or `U.S.`. This is a post-processing display rule, not part of the
+translation prompt.
 
 SRT bilingual output is intentionally rejected because SRT cannot express
 different font sizes or visual hierarchy inside a single subtitle cue. Use ASS
@@ -230,8 +253,9 @@ SUBTRANS_PROMPT_FILE        Style/custom prompt file path appended after the for
 SUBTRANS_ASS_TARGET_SIZE    Optional ASS target-language font size.
 SUBTRANS_ASS_SOURCE_SIZE    Optional ASS source-language font size.
 SUBTRANS_ASS_HEIGHT         Optional video height used to pick ASS default sizes.
-SUBTRANS_ASS_MARGINV        Optional ASS bottom margin.
-SUBTRANS_ASS_FONT           Optional ASS font name.
+SUBTRANS_ASS_MARGINV        Optional ASS bottom margin. In bilingual ASS this controls the source line.
+SUBTRANS_ASS_FONT           Optional ASS target-language font name.
+SUBTRANS_ASS_SOURCE_FONT    Optional ASS source-language font name.
 SUBTRANS_RUNTIME_DIR        Runtime dependency directory. Default: .runtime.
 SUBTRANS_UPSTREAM_DIR       Installed upstream directory.
 SUBTRANS_UPSTREAM_REF       Upstream commit/ref to install.

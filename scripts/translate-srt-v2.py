@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from subtitle_text import strip_terminal_statement_punctuation_from_lines
+
 
 TIME_RE = re.compile(r"(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})")
 TIMESTAMP_ARTIFACT_RE = re.compile(r"\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}")
@@ -129,7 +131,9 @@ def format_srt(cues: list[Cue], translations: list[dict[str, str]]) -> str:
     for cue, item in zip(cues, translations):
         if cue.number != item["number"]:
             raise ValueError(f"final compose cue mismatch: {cue.number} != {item['number']}")
-        text_lines = [line for line in item["translation"].split("\n") if line.strip()]
+        text_lines = strip_terminal_statement_punctuation_from_lines(
+            [line for line in item["translation"].split("\n") if line.strip()]
+        )
         blocks.append("\n".join([cue.number, f"{cue.start} --> {cue.end}", *text_lines]))
 
     return "\n\n".join(blocks) + "\n\n"

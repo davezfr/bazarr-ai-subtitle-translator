@@ -206,6 +206,10 @@ if [ "$EMPTY_OUTPUT_COUNT" -gt 0 ]; then
   exit 1
 fi
 
+TMP_CLEAN_OUTPUT="$OUTPUT_PATH.clean.$$"
+python3 "$PROJECT_DIR/scripts/clean-srt-display.py" "$TMP_OUTPUT" "$TMP_CLEAN_OUTPUT"
+mv "$TMP_CLEAN_OUTPUT" "$TMP_OUTPUT"
+
 if [ "$OUTPUT_FORMAT" = "ass" ]; then
   set -- \
     --source "$INPUT_PATH" \
@@ -226,6 +230,9 @@ if [ "$OUTPUT_FORMAT" = "ass" ]; then
   fi
   if [ -n "${SUBTRANS_ASS_FONT:-}" ]; then
     set -- "$@" --font "$SUBTRANS_ASS_FONT"
+  fi
+  if [ -n "${SUBTRANS_ASS_SOURCE_FONT:-}" ]; then
+    set -- "$@" --source-font "$SUBTRANS_ASS_SOURCE_FONT"
   fi
 
   python3 "$PROJECT_DIR/scripts/build-ass-subtitle.py" "$@"

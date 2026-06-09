@@ -127,3 +127,48 @@ Reasoning:
   media libraries.
 - Generic labels are not names; translating them improves readability for the
   target-language viewer without changing character identity.
+
+## Bilingual ASS uses two layered dialogue styles
+
+Date: 2026-06-09
+
+For bilingual ASS, each cue is rendered as two same-time ASS dialogue events:
+
+```text
+Dialogue: ...,ZH,...,<target-language text>
+Dialogue: ...,EN,...,<source-language text>
+```
+
+The target-language style is larger, white, and positioned above the
+source-language style. The source-language style is smaller, near-white pale
+yellow, and positioned closer to the bottom edge.
+
+Reasoning:
+
+- A bilingual cue should visually read as two lines: target language above,
+  source language below.
+- Keeping both languages inside one ASS dialogue requires fragile inline
+  overrides such as `{\fs...}` and can accidentally inherit the wrong font size.
+- Separate styles make typography, color, border, shadow, and bottom margins
+  easy to tune without involving the translation model.
+- Existing SRT line breaks are presentation hints for single-language subtitles.
+  The bilingual builder flattens them into one line per language so a wrapped
+  source cue does not become a four-line bilingual block.
+
+## Display punctuation cleanup stays outside the prompt
+
+Date: 2026-06-09
+
+Subtitle display output removes ordinary statement punctuation at line endings:
+Chinese `。` / `，` and English `.` / `,`. It preserves `？`, `?`, `！`, `!`,
+ellipses, and protected English abbreviations such as `Mr.` and `U.S.`.
+
+Reasoning:
+
+- Subtitle punctuation is a presentation rule, not a translation-quality rule.
+- Keeping this out of the prompt avoids making the model over-optimize for
+  formatting instead of translation.
+- Deterministic cleanup is easier to test and keeps the behavior consistent
+  across V2, the upstream wrapper, target SRT output, and ASS composition.
+- The cleanup is intentionally narrow: it removes only ordinary line-ending
+  statement punctuation and does not rewrite internal punctuation.

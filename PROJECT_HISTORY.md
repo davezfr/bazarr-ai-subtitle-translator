@@ -159,3 +159,63 @@ sh tests/v2-translator.sh
 ffmpeg -f lavfi -i color=size=1920x1080:duration=1:rate=1 \
   -vf "ass=<bilingual.ass>" -frames:v 1 -f null -
 ```
+
+## 2026-06-09 - Fix bilingual ASS inline font inheritance
+
+- Updated bilingual ASS composition to interleave matching target/source lines.
+- Explicitly emits target font size before each target line and source font size
+  before each source line so later Chinese lines do not inherit the smaller
+  English size.
+- Increased the 1080p default bilingual ASS sizing to Chinese 48 / source 32
+  after Plex visual inspection showed the previous output was too small.
+- Re-generated and uploaded the Daredevil S02E01 `.Chinese.ass` sidecar to the
+  NAS test path.
+
+Verification:
+
+```bash
+sh tests/v2-translator.sh
+ffmpeg -f lavfi -i color=size=1920x1080:duration=1:rate=1 \
+  -vf "ass=<bilingual.ass>" -frames:v 1 -f null -
+```
+
+## 2026-06-09 - Switch bilingual ASS to layered two-line preset
+
+- Replaced the inline mixed-language bilingual ASS dialogue with two same-time
+  dialogue events using `ZH` and `EN` styles.
+- Adopted a 1080p film-default preset: target 56, source 36, white target text,
+  near-white pale yellow source text, black outline, light shadow, and separate bottom
+  margins.
+- Flattened existing SRT line breaks into one line per language in bilingual
+  ASS mode so wrapped source cues do not render as four-line bilingual blocks.
+- Added `SUBTRANS_ASS_SOURCE_FONT` so target and source fonts can be tuned
+  separately.
+
+Verification:
+
+```bash
+sh tests/v2-translator.sh
+sh tests/wrapper-behavior.sh
+python3 -m py_compile scripts/translate-srt-v2.py scripts/build-ass-subtitle.py
+git diff --check
+```
+
+## 2026-06-09 - Add display punctuation cleanup
+
+- Added `scripts/subtitle_text.py` as a shared display-layer cleanup helper.
+- Added `scripts/clean-srt-display.py` so the upstream wrapper can clean target
+  SRT output before writing final SRT or composing ASS.
+- Applied the same cleanup in V2 SRT composition and ASS composition.
+- Removed ordinary terminal statement punctuation (`。`, `，`, `.`, `,`) while
+  preserving questions, exclamations, ellipses, and protected English
+  abbreviations such as `Mr.` and `U.S.`.
+
+Verification:
+
+```bash
+sh tests/prompt-contract.sh
+sh tests/v2-translator.sh
+sh tests/wrapper-behavior.sh
+python3 -m py_compile scripts/translate-srt-v2.py scripts/build-ass-subtitle.py scripts/clean-srt-display.py scripts/subtitle_text.py
+git diff --check
+```

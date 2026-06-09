@@ -65,6 +65,17 @@ sh tests/wrapper-behavior.sh
   chunk size 100, concurrency 6, and 7 chunks for 621 cues. It completed in
   84.467s with zero retries. Translation took 84.461s; the slowest chunk was
   chunk 2 at 84.455s. Source and target both validated at 621 cues.
+- Bilingual ASS layout after Plex inspection: 1080p defaults are target size 56
+  and source size 36. The builder now emits two same-time dialogue events with
+  `ZH` and `EN` styles instead of mixing both languages in one dialogue with
+  inline font-size overrides. The source line is near-white pale yellow and the
+  bilingual line gap is intentionally tight. Existing SRT line breaks are
+  flattened to one line per language to avoid four-line bilingual blocks.
+- Display punctuation cleanup now lives in `scripts/subtitle_text.py` and is
+  applied by V2 SRT composition, the upstream wrapper via
+  `scripts/clean-srt-display.py`, and ASS composition. It removes ordinary
+  terminal `。` / `，` / `.` / `,` while preserving questions, exclamations,
+  ellipses, and protected abbreviations.
 
 ## Sensible Next Steps
 

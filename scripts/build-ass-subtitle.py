@@ -8,6 +8,8 @@ import re
 import sys
 from pathlib import Path
 
+from subtitle_text import strip_terminal_statement_punctuation, strip_terminal_statement_punctuation_from_lines
+
 
 ASS_HEADER = """[Script Info]
 ScriptType: v4.00+
@@ -18,17 +20,24 @@ PlayResY: {playres_y}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{target_size},&H00FFFFFF,&H000000FF,&H64000000,&H00000000,1,0,0,0,100,100,0,0,1,1.2,0,2,20,20,{marginv},1
+{styles}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 SIZE_TABLE = {
-    360: (22, 13),
-    720: (22, 13),
-    1080: (20, 12),
-    2160: (20, 12),
+    360: (19, 14),
+    720: (38, 24),
+    1080: (56, 36),
+    2160: (112, 72),
+}
+
+SOURCE_MARGIN_TABLE = {
+    360: 18,
+    720: 36,
+    1080: 55,
+    2160: 110,
 }
 
 PLAYRES_TABLE = {
@@ -71,8 +80,45 @@ def ass_escape(text: str) -> str:
     return text
 
 
-def join_lines(lines: list[str]) -> str:
-    return r"\N".join(ass_escape(line.strip()) for line in lines if line.strip())
+def join_lines(lines: list[str], *, clean_terminal: bool = False) -> str:
+    text_lines = strip_terminal_statement_punctuation_from_lines(lines) if clean_terminal else lines
+    return r"\N".join(ass_escape(line.strip()) for line in text_lines if line.strip())
+
+
+def join_flat_lines(lines: list[str], *, clean_terminal: bool = False) -> str:
+    text_lines = strip_terminal_statement_punctuation_from_lines(lines) if clean_terminal else lines
+    stripped_lines = [line.strip() for line in text_lines if line.strip()]
+    if not stripped_lines:
+        return ""
+
+    text = stripped_lines[0]
+    for line in stripped_lines[1:]:
+        separator = " " if needs_flat_separator(text, line) else ""
+        text = f"{text}{separator}{line}"
+    if clean_terminal:
+        text = strip_terminal_statement_punctuation(text)
+    return ass_escape(text)
+
+
+def is_cjk_or_cjk_punctuation(char: str) -> bool:
+    codepoint = ord(char)
+    return (
+        0x3400 <= codepoint <= 0x4DBF
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0xF900 <= codepoint <= 0xFAFF
+        or char in "，。！？、：；（）【】《》「」『』"
+    )
+
+
+def needs_flat_separator(previous_text: str, next_text: str) -> bool:
+    if next_text.startswith(("-", "–", "—")):
+        return True
+
+    previous_char = previous_text[-1]
+    next_char = next_text[0]
+    if is_cjk_or_cjk_punctuation(previous_char) or is_cjk_or_cjk_punctuation(next_char):
+        return False
+    return True
 
 
 def pick_sizes(height: int | None, target_override: int | None, source_override: int | None) -> tuple[int, int]:
@@ -88,19 +134,48 @@ def pick_sizes(height: int | None, target_override: int | None, source_override:
     return target_size, source_size
 
 
+def pick_source_margin(height: int | None, margin_override: int | None) -> int:
+    if margin_override is not None:
+        return margin_override
+    nearest_height = min(SOURCE_MARGIN_TABLE, key=lambda candidate: abs(candidate - (height or 720)))
+    return SOURCE_MARGIN_TABLE[nearest_height]
+
+
 def pick_playres(height: int | None) -> tuple[int, int]:
     nearest_height = min(PLAYRES_TABLE, key=lambda candidate: abs(candidate - (height or 720)))
     return PLAYRES_TABLE[nearest_height]
+
+
+def build_styles(
+    mode: str,
+    target_font: str,
+    source_font: str,
+    target_size: int,
+    source_size: int,
+    source_marginv: int,
+) -> str:
+    if mode == "bilingual":
+        line_gap = max(2, round(source_size * 0.05))
+        target_marginv = source_marginv + source_size + line_gap
+        return "\n".join(
+            [
+                f"Style: ZH,{target_font},{target_size},&H00FFFFFF,&H000000FF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,3.0,0.6,2,120,120,{target_marginv},1",
+                f"Style: EN,{source_font},{source_size},&H00D6F4FF,&H000000FF,&H00000000,&H90000000,0,0,0,0,100,100,0,0,1,2.4,0.4,2,120,120,{source_marginv},1",
+            ]
+        )
+
+    return f"Style: Default,{target_font},{target_size},&H00FFFFFF,&H000000FF,&H64000000,&H00000000,1,0,0,0,100,100,0,0,1,1.2,0,2,20,20,{source_marginv},1"
 
 
 def build_ass(
     source_items: list[tuple[str, str, list[str]]],
     target_items: list[tuple[str, str, list[str]]],
     mode: str,
-    font: str,
+    target_font: str,
+    source_font: str,
     target_size: int,
     source_size: int,
-    marginv: int,
+    source_marginv: int,
     playres_x: int,
     playres_y: int,
 ) -> str:
@@ -109,9 +184,7 @@ def build_ass(
 
     lines = [
         ASS_HEADER.format(
-            font=font,
-            target_size=target_size,
-            marginv=marginv,
+            styles=build_styles(mode, target_font, source_font, target_size, source_size, source_marginv),
             playres_x=playres_x,
             playres_y=playres_y,
         )
@@ -122,13 +195,17 @@ def build_ass(
         if source_start != target_start or source_end != target_end:
             raise ValueError(f"SRT timestamp mismatch at entry {index}: source={source_start}->{source_end} target={target_start}->{target_end}")
 
-        text = join_lines(target_text)
         if mode == "bilingual":
-            text = f"{text}\\N{{\\fs{source_size}}}{join_lines(source_text)}"
-
-        lines.append(
-            f"Dialogue: 0,{srt_time_to_ass(target_start)},{srt_time_to_ass(target_end)},Default,,0,0,0,,{text}"
-        )
+            lines.append(
+                f"Dialogue: 1,{srt_time_to_ass(target_start)},{srt_time_to_ass(target_end)},ZH,,0,0,0,,{join_flat_lines(target_text, clean_terminal=True)}"
+            )
+            lines.append(
+                f"Dialogue: 0,{srt_time_to_ass(target_start)},{srt_time_to_ass(target_end)},EN,,0,0,0,,{join_flat_lines(source_text, clean_terminal=True)}"
+            )
+        else:
+            lines.append(
+                f"Dialogue: 0,{srt_time_to_ass(target_start)},{srt_time_to_ass(target_end)},Default,,0,0,0,,{join_lines(target_text, clean_terminal=True)}"
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -142,7 +219,8 @@ def main() -> int:
     parser.add_argument("--source-size", type=int, default=None)
     parser.add_argument("--height", type=int, default=None)
     parser.add_argument("--font", default="PingFang SC")
-    parser.add_argument("--marginv", type=int, default=16)
+    parser.add_argument("--source-font", default="Arial")
+    parser.add_argument("--marginv", type=int, default=None, help="Bottom margin for target-only subtitles or bilingual source-language line.")
     args = parser.parse_args()
 
     source_path = Path(args.source)
@@ -157,6 +235,7 @@ def main() -> int:
         return 1
 
     target_size, source_size = pick_sizes(args.height, args.target_size, args.source_size)
+    source_marginv = pick_source_margin(args.height, args.marginv)
     playres_x, playres_y = pick_playres(args.height)
     try:
         ass = build_ass(
@@ -164,9 +243,10 @@ def main() -> int:
             target_items,
             args.mode,
             args.font,
+            args.source_font,
             target_size,
             source_size,
-            args.marginv,
+            source_marginv,
             playres_x,
             playres_y,
         )
