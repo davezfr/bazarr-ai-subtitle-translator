@@ -144,3 +144,18 @@ grep -c -- '-->' <source.srt>
 grep -c -- '-->' <target.srt>
 git diff --check
 ```
+
+## 2026-06-09 - Add ASS PlayRes scaling baseline
+
+- Added `PlayResX` and `PlayResY` to generated ASS headers.
+- Mapped common video heights to PlayRes baselines, such as 1080 -> 1920x1080.
+- Re-generated the Daredevil bilingual ASS test file and verified ffmpeg/libass
+  no longer warns that PlayRes is missing.
+
+Verification:
+
+```bash
+sh tests/v2-translator.sh
+ffmpeg -f lavfi -i color=size=1920x1080:duration=1:rate=1 \
+  -vf "ass=<bilingual.ass>" -frames:v 1 -f null -
+```

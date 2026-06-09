@@ -13,6 +13,8 @@ ASS_HEADER = """[Script Info]
 ScriptType: v4.00+
 WrapStyle: 2
 ScaledBorderAndShadow: yes
+PlayResX: {playres_x}
+PlayResY: {playres_y}
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
@@ -27,6 +29,13 @@ SIZE_TABLE = {
     720: (22, 13),
     1080: (20, 12),
     2160: (20, 12),
+}
+
+PLAYRES_TABLE = {
+    360: (640, 360),
+    720: (1280, 720),
+    1080: (1920, 1080),
+    2160: (3840, 2160),
 }
 
 
@@ -79,6 +88,11 @@ def pick_sizes(height: int | None, target_override: int | None, source_override:
     return target_size, source_size
 
 
+def pick_playres(height: int | None) -> tuple[int, int]:
+    nearest_height = min(PLAYRES_TABLE, key=lambda candidate: abs(candidate - (height or 720)))
+    return PLAYRES_TABLE[nearest_height]
+
+
 def build_ass(
     source_items: list[tuple[str, str, list[str]]],
     target_items: list[tuple[str, str, list[str]]],
@@ -87,11 +101,21 @@ def build_ass(
     target_size: int,
     source_size: int,
     marginv: int,
+    playres_x: int,
+    playres_y: int,
 ) -> str:
     if len(source_items) != len(target_items):
         raise ValueError(f"SRT entry count mismatch: source={len(source_items)} target={len(target_items)}")
 
-    lines = [ASS_HEADER.format(font=font, target_size=target_size, marginv=marginv)]
+    lines = [
+        ASS_HEADER.format(
+            font=font,
+            target_size=target_size,
+            marginv=marginv,
+            playres_x=playres_x,
+            playres_y=playres_y,
+        )
+    ]
     for index, (source_item, target_item) in enumerate(zip(source_items, target_items), start=1):
         source_start, source_end, source_text = source_item
         target_start, target_end, target_text = target_item
@@ -133,8 +157,19 @@ def main() -> int:
         return 1
 
     target_size, source_size = pick_sizes(args.height, args.target_size, args.source_size)
+    playres_x, playres_y = pick_playres(args.height)
     try:
-        ass = build_ass(source_items, target_items, args.mode, args.font, target_size, source_size, args.marginv)
+        ass = build_ass(
+            source_items,
+            target_items,
+            args.mode,
+            args.font,
+            target_size,
+            source_size,
+            args.marginv,
+            playres_x,
+            playres_y,
+        )
     except ValueError as error:
         print(f"build-ass-subtitle: {error}", file=sys.stderr)
         return 1

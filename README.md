@@ -158,6 +158,10 @@ the target-language translation. The wrapper then combines translated text with
 the original source text so the target language appears on top and the original
 line appears below at a smaller size.
 
+ASS output includes `PlayResX` and `PlayResY` based on
+`SUBTRANS_ASS_HEIGHT` or the `--height` argument so libass has an explicit
+scaling baseline.
+
 SRT bilingual output is intentionally rejected because SRT cannot express
 different font sizes or visual hierarchy inside a single subtitle cue. Use ASS
 for bilingual subtitles.

@@ -82,7 +82,38 @@ test_validator_rejects_extra_worker_cue() {
   rm -rf "$work_dir"
 }
 
+test_ass_header_includes_playres() {
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/subtitle-v2-test.XXXXXX")
+  source="$work_dir/movie.en.srt"
+  target="$work_dir/movie.zh.srt"
+  output="$work_dir/movie.zh.ass"
+
+  make_sample_srt "$source"
+  cat > "$target" <<'EOF'
+1
+00:00:01,000 --> 00:00:03,000
+你好。
+
+2
+00:00:03,500 --> 00:00:05,000
+你好吗？
+EOF
+
+  python3 "$PROJECT_DIR/scripts/build-ass-subtitle.py" \
+    --source "$source" \
+    --target "$target" \
+    --output "$output" \
+    --mode bilingual \
+    --height 1080 >/dev/null
+
+  grep -q '^PlayResX: 1920$' "$output" || fail "ASS header missing PlayResX"
+  grep -q '^PlayResY: 1080$' "$output" || fail "ASS header missing PlayResY"
+
+  rm -rf "$work_dir"
+}
+
 test_fake_worker_rebuilds_srt_from_source_structure
 test_validator_rejects_extra_worker_cue
+test_ass_header_includes_playres
 
 echo "v2-translator: ok"
